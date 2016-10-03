@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 
 from sklearn.externals import joblib
-model = joblib.load('model.pkl')
+import sys
 
-print model.predict([[0, 1]])
+CHARACTERS = joblib.load('characters.pkl')
+model = joblib.load('model.pkl')
+vectorizer = joblib.load('vectorizer.pkl')
+
+result = model.predict(vectorizer.transform([sys.argv[1]]))
+
+print CHARACTERS[result[0]]
