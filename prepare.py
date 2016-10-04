@@ -21,6 +21,14 @@ CHARACTERS = {
     'KRAMER': 3
 }
 
+vectorizer = TfidfVectorizer(min_df=1,
+    analyzer='word',
+    stop_words='english',
+    lowercase=True,
+    binary=False)
+
+TRAIN_LIMIT = 16000
+
 def get_lines(character, limit=100, offset=0, words=6):
     cursor.execute('SELECT text FROM utterance \
     WHERE speaker=? \
@@ -30,19 +38,12 @@ def get_lines(character, limit=100, offset=0, words=6):
     return filter(lambda l: len(l.split(' ')) >= words,
         map(lambda l: l[0].lower(), cursor.fetchall()))
 
-vectorizer = TfidfVectorizer(min_df=1,
-    analyzer='word',
-    stop_words='english',
-    lowercase=True,
-    binary=False)
-
-TRAIN_LIMIT = 16000
 
 def get_features():
-    jerry_lines = get_lines('JERRY', limit=TRAIN_LIMIT, words=4)
-    george_lines = get_lines('GEORGE', limit=TRAIN_LIMIT, words=3)
-    elaine_lines = get_lines('ELAINE', limit=TRAIN_LIMIT, words=0)
-    kramer_lines = get_lines('KRAMER', limit=TRAIN_LIMIT, words=0)
+    jerry_lines = get_lines('JERRY', limit=TRAIN_LIMIT, words=6)
+    george_lines = get_lines('GEORGE', limit=TRAIN_LIMIT, words=6)
+    elaine_lines = get_lines('ELAINE', limit=TRAIN_LIMIT, words=2)
+    kramer_lines = get_lines('KRAMER', limit=TRAIN_LIMIT, words=2)
 
     lines = jerry_lines + george_lines + elaine_lines + kramer_lines
 
@@ -54,10 +55,11 @@ def get_features():
 
     return features, answers
 
+
 def build_model(features, answers):
-    model = SGDClassifier(n_iter=15,
+    model = SGDClassifier(n_iter=25,
         penalty='l2',
-        epsilon=0.2,
+        epsilon=0.25,
         alpha=0.00001,
         loss='hinge')
     model.fit(features, answers)
@@ -65,34 +67,29 @@ def build_model(features, answers):
 
     return model
 
-def test_character(character, test_limit=500):
+
+def test_character(character, test_limit=TRAIN_LIMIT):
     test_lines = get_lines(character, limit=test_limit)
 
-    test_features = vectorizer.transform(test_lines).toarray()
+    test_features = vectorizer.transform(test_lines)
     test_answers = np.array([CHARACTERS[character]] * len(test_lines))
     test_predictions = model.predict(test_features)
 
     return accuracy_score(test_answers, test_predictions)
 
+
 def test_model(model):
     print 'accuracy on same set', accuracy_score(answers, model.predict(features))
+    return map(test_character, CHARACTERS.keys())
 
 
-    test_jerry = test_character('JERRY')
-    test_george = test_character('GEORGE')
-    test_elaine = test_character('ELAINE')
-    test_kramer = test_character('KRAMER')
-
-    # embed()
-
-    return [test_jerry, test_george, test_elaine, test_kramer]
+features, answers = get_features()
 
 while(True):
-    features, answers = get_features()
     model = build_model(features, answers)
     results = test_model(model)
 
-    if all(map(lambda metric: metric > 0.64, results)):
+    if all(map(lambda metric: metric > 0.69, results)):
         test_jerry, test_george, test_elaine, test_kramer = results
         print 'accuracy on test set (jerry)', test_jerry
         print 'accuracy on test set (george)', test_george
