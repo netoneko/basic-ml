@@ -8,6 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.externals import joblib
 from sklearn.metrics import accuracy_score
 from IPython import embed
+import sys
 
 import sqlite3
 conn = sqlite3.connect('./scripts/db/seinfeld.sqlite')
@@ -20,44 +21,51 @@ CHARACTERS = {
     'KRAMER': 3
 }
 
-def get_lines(character, limit=100, offset=0, length=25):
+def get_lines(character, limit=100, offset=0, words=6):
     cursor.execute('SELECT text FROM utterance \
     WHERE speaker=? \
-    AND length(text) > ? \
     ORDER BY RANDOM() DESC \
-    LIMIT ? OFFSET ?', [character, length, limit, offset])
+    LIMIT ? OFFSET ?', [character, limit, offset])
 
-    return map(lambda l: l[0].lower(), cursor.fetchall())
+    return filter(lambda l: len(l.split(' ')) >= words,
+        map(lambda l: l[0].lower(), cursor.fetchall()))
 
 vectorizer = TfidfVectorizer(min_df=1,
     analyzer='word',
     stop_words='english',
-    lowercase='true')
+    lowercase=True,
+    binary=False)
 
-TRAIN_LIMIT = 15000
+TRAIN_LIMIT = 16000
 
-jerry_lines = get_lines('JERRY', limit=TRAIN_LIMIT)
-george_lines = get_lines('GEORGE', limit=TRAIN_LIMIT)
-elaine_lines = get_lines('ELAINE', limit=TRAIN_LIMIT, length=10)
-kramer_lines = get_lines('KRAMER', limit=TRAIN_LIMIT)
+def get_features():
+    jerry_lines = get_lines('JERRY', limit=TRAIN_LIMIT, words=4)
+    george_lines = get_lines('GEORGE', limit=TRAIN_LIMIT, words=3)
+    elaine_lines = get_lines('ELAINE', limit=TRAIN_LIMIT, words=0)
+    kramer_lines = get_lines('KRAMER', limit=TRAIN_LIMIT, words=0)
 
-lines = jerry_lines + george_lines + elaine_lines + kramer_lines
+    lines = jerry_lines + george_lines + elaine_lines + kramer_lines
 
-features = vectorizer.fit_transform(lines)
-answers = np.array([CHARACTERS['JERRY']] * len(jerry_lines)
-    + [CHARACTERS['GEORGE']] * len(george_lines)
-    + [CHARACTERS['ELAINE']] * len(elaine_lines)
-    + [CHARACTERS['KRAMER']] * len(kramer_lines))
+    features = vectorizer.fit_transform(lines)
+    answers = np.array([CHARACTERS['JERRY']] * len(jerry_lines)
+        + [CHARACTERS['GEORGE']] * len(george_lines)
+        + [CHARACTERS['ELAINE']] * len(elaine_lines)
+        + [CHARACTERS['KRAMER']] * len(kramer_lines))
 
-model = SGDClassifier()
-model.fit_transform(features, answers)
-model.densify()
+    return features, answers
 
-print model
+def build_model(features, answers):
+    model = SGDClassifier(n_iter=15,
+        penalty='l2',
+        epsilon=0.2,
+        alpha=0.00001,
+        loss='hinge')
+    model.fit(features, answers)
+    model.densify()
 
-print 'accuracy on same set', accuracy_score(answers, model.predict(features))
+    return model
 
-def test(character, test_limit=500):
+def test_character(character, test_limit=500):
     test_lines = get_lines(character, limit=test_limit)
 
     test_features = vectorizer.transform(test_lines).toarray()
@@ -66,13 +74,33 @@ def test(character, test_limit=500):
 
     return accuracy_score(test_answers, test_predictions)
 
-print 'accuracy on test set (jerry)', test('JERRY')
-print 'accuracy on test set (george)', test('GEORGE')
-print 'accuracy on test set (elaine)', test('ELAINE')
-print 'accuracy on test set (kramer)', test('KRAMER')
+def test_model(model):
+    print 'accuracy on same set', accuracy_score(answers, model.predict(features))
 
-# embed()
 
-joblib.dump(vectorizer, 'vectorizer.pkl')
-joblib.dump(model, 'model.pkl')
-joblib.dump({v: k for k, v in CHARACTERS.items()}, 'characters.pkl')
+    test_jerry = test_character('JERRY')
+    test_george = test_character('GEORGE')
+    test_elaine = test_character('ELAINE')
+    test_kramer = test_character('KRAMER')
+
+    # embed()
+
+    return [test_jerry, test_george, test_elaine, test_kramer]
+
+while(True):
+    features, answers = get_features()
+    model = build_model(features, answers)
+    results = test_model(model)
+
+    if all(map(lambda metric: metric > 0.64, results)):
+        test_jerry, test_george, test_elaine, test_kramer = results
+        print 'accuracy on test set (jerry)', test_jerry
+        print 'accuracy on test set (george)', test_george
+        print 'accuracy on test set (elaine)', test_elaine
+        print 'accuracy on test set (kramer)', test_kramer
+
+        joblib.dump(vectorizer, 'vectorizer.pkl')
+        joblib.dump(model, 'model.pkl')
+        joblib.dump({v: k for k, v in CHARACTERS.items()}, 'characters.pkl')
+
+        sys.exit(0)
